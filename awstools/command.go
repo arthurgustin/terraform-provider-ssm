@@ -32,42 +32,29 @@ const sleepTime = 10
 const maxLogMsgSize = 65536
 
 type AwsClients struct {
-	ctx       context.Context
 	ec2Client *ec2.Client
 	ssmClient *ssm.Client
 	s3Client  *s3.Client
 }
 
-func NewAwsClients(ctx context.Context) (*AwsClients, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
-
-	if err != nil {
-		return nil, err
-	}
-
-	clients := AwsClients{ctx: ctx, ec2Client: ec2.NewFromConfig(cfg), ssmClient: ssm.NewFromConfig(cfg), s3Client: s3.NewFromConfig(cfg)}
-
-	return &clients, nil
-}
-
 // Wait until the target EC2 instances status is online
-func (clients AwsClients) waitForTargetInstances(ec2Filters []ec2types.Filter, ssmFilters []ssmtypes.InstanceInformationStringFilter, waitTimeout int) error {
+func (clients AwsClients) waitForTargetInstances(ctx context.Context, ec2Filters []ec2types.Filter, ssmFilters []ssmtypes.InstanceInformationStringFilter, waitTimeout int) error {
 	for i := 0; i < waitTimeout/sleepTime; i++ {
-		ec2Instances, err := clients.ec2Client.DescribeInstances(clients.ctx, &ec2.DescribeInstancesInput{
+		ec2Instances, err := clients.ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 			Filters: ec2Filters,
 		})
 
 		if err != nil {
-			log.Error(clients.ctx, err.Error())
+			log.Error(ctx, err.Error())
 			return err
 		}
 
-		ssmInstances, err := clients.ssmClient.DescribeInstanceInformation(clients.ctx, &ssm.DescribeInstanceInformationInput{
+		ssmInstances, err := clients.ssmClient.DescribeInstanceInformation(ctx, &ssm.DescribeInstanceInformationInput{
 			Filters: ssmFilters,
 		})
 
 		if err != nil {
-			log.Error(clients.ctx, err.Error())
+			log.Error(ctx, err.Error())
 			return err
 		}
 
@@ -86,7 +73,7 @@ func (clients AwsClients) waitForTargetInstances(ec2Filters []ec2types.Filter, s
 				}
 			}
 
-			log.Info(clients.ctx, fmt.Sprintf("%d of %d target instances are online.", onlineInstanceCount, ec2InstanceCount))
+			log.Info(ctx, fmt.Sprintf("%d of %d target instances are online.", onlineInstanceCount, ec2InstanceCount))
 
 			if onlineInstanceCount == ec2InstanceCount {
 				return nil
@@ -96,20 +83,20 @@ func (clients AwsClients) waitForTargetInstances(ec2Filters []ec2types.Filter, s
 		time.Sleep(sleepTime * time.Second)
 	}
 
-	log.Error(clients.ctx, "Target instances are not online.")
+	log.Error(ctx, "Target instances are not online.")
 
 	return errors.New("target instances are not online")
 }
 
 // Wait for the command invocations to complete
-func (clients AwsClients) waitForCommandInvocations(commandId string, timeout *int) error {
+func (clients AwsClients) waitForCommandInvocations(ctx context.Context, commandId string, timeout *int) error {
 	for i := 0; i < *timeout/sleepTime; i++ {
-		output, err := clients.ssmClient.ListCommandInvocations(clients.ctx, &ssm.ListCommandInvocationsInput{
+		output, err := clients.ssmClient.ListCommandInvocations(ctx, &ssm.ListCommandInvocationsInput{
 			CommandId: &commandId,
 		})
 
 		if err != nil {
-			log.Error(clients.ctx, err.Error())
+			log.Error(ctx, err.Error())
 			return err
 		}
 
@@ -124,7 +111,7 @@ func (clients AwsClients) waitForCommandInvocations(commandId string, timeout *i
 			if invocation.Status == "Pending" || invocation.Status == "InProgress" {
 				pendingExecutionsCount += 1
 			} else if invocation.Status == "Cancelled" || invocation.Status == "TimedOut" || invocation.Status == "Failed" {
-				log.Info(clients.ctx, fmt.Sprintf("Command %s invocation %s on instance %s.",
+				log.Info(ctx, fmt.Sprintf("Command %s invocation %s on instance %s.",
 					commandId, invocation.Status, *invocation.InstanceId))
 
 				return fmt.Errorf("command invocation %s on %s instance", strings.ToLower(string(invocation.Status)), *invocation.InstanceId)
@@ -138,32 +125,32 @@ func (clients AwsClients) waitForCommandInvocations(commandId string, timeout *i
 		time.Sleep(sleepTime * time.Second)
 	}
 
-	log.Error(clients.ctx, "Command invocations timed out.")
+	log.Error(ctx, "Command invocations timed out.")
 
 	return errors.New("command invocations timed out")
 }
 
 // Retrieves from S3 and prints outputs of the command invocations.
-func (clients AwsClients) printCommandOutput(prefix *string, commandId string, s3Bucket *string) error {
+func (clients AwsClients) printCommandOutput(ctx context.Context, prefix *string, commandId string, s3Bucket *string) error {
 	if s3Bucket == nil || *s3Bucket == "" {
-		log.Info(clients.ctx, "The output S3 bucket is not specified for ssm_command resource.")
+		log.Info(ctx, "The output S3 bucket is not specified for ssm_command resource.")
 		return nil
 	}
 
-	location, err := clients.s3Client.GetBucketLocation(clients.ctx, &s3.GetBucketLocationInput{
+	location, err := clients.s3Client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{
 		Bucket: s3Bucket,
 	})
 
 	if err != nil {
-		log.Error(clients.ctx, err.Error())
+		log.Error(ctx, err.Error())
 		return err
 	}
 
 	// Create S3 service client with a specific Region.
-	cfg, err := config.LoadDefaultConfig(clients.ctx)
+	cfg, err := config.LoadDefaultConfig(ctx)
 
 	if err != nil {
-		log.Error(clients.ctx, err.Error())
+		log.Error(ctx, err.Error())
 		return err
 	}
 
@@ -175,37 +162,38 @@ func (clients AwsClients) printCommandOutput(prefix *string, commandId string, s
 		keyPrefix = *prefix + "/" + commandId
 	}
 
-	objects, err := s3BucketClient.ListObjectsV2(clients.ctx, &s3.ListObjectsV2Input{
+	maxKeys := int32(1000)
+	objects, err := s3BucketClient.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket:  s3Bucket,
-		MaxKeys: 1000,
+		MaxKeys: &maxKeys,
 		Prefix:  &keyPrefix,
 	})
 
 	if err != nil {
-		log.Error(clients.ctx, err.Error())
+		log.Error(ctx, err.Error())
 		return err
 	}
 
 	if objects.Contents != nil {
 		for _, key := range objects.Contents {
-			object, err := s3BucketClient.GetObject(clients.ctx, &s3.GetObjectInput{
+			object, err := s3BucketClient.GetObject(ctx, &s3.GetObjectInput{
 				Bucket: s3Bucket,
 				Key:    key.Key,
 			})
 
 			if err != nil {
-				log.Error(clients.ctx, err.Error())
+				log.Error(ctx, err.Error())
 			} else {
 				bytes, err := io.ReadAll(object.Body)
 				if err == nil {
-					log.Info(clients.ctx, fmt.Sprintf("\n*** %s ***", *key.Key))
+					log.Info(ctx, fmt.Sprintf("\n*** %s ***", *key.Key))
 					msg := string(bytes)
 					// Slice the message into 64KB pieces.
 					n := len(msg) / maxLogMsgSize
 					for i := 0; i < n; i++ {
-						log.Info(clients.ctx, msg[i*maxLogMsgSize:(i+1)*maxLogMsgSize])
+						log.Info(ctx, msg[i*maxLogMsgSize:(i+1)*maxLogMsgSize])
 					}
-					log.Info(clients.ctx, msg[n*maxLogMsgSize:])
+					log.Info(ctx, msg[n*maxLogMsgSize:])
 				}
 			}
 		}
@@ -218,7 +206,7 @@ func (clients AwsClients) printCommandOutput(prefix *string, commandId string, s
 // Sends SSM command.
 // Waits for the command invocations to complete.
 // Retrieves from S3 and prints outputs of the command invocations.
-func (clients AwsClients) RunCommand(documentName *string, parameters map[string][]string, ssmTargets []ssmtypes.Target, executionTimeout *int, comment *string, s3Bucket *string, s3KeyPrefix *string) (ssmtypes.Command, error) {
+func (clients AwsClients) RunCommand(ctx context.Context, documentName *string, parameters map[string][]string, ssmTargets []ssmtypes.Target, executionTimeout *int, comment *string, s3Bucket *string, s3KeyPrefix *string) (ssmtypes.Command, error) {
 	var ec2Filters []ec2types.Filter
 	var ssmFilters []ssmtypes.InstanceInformationStringFilter
 
@@ -234,14 +222,13 @@ func (clients AwsClients) RunCommand(documentName *string, parameters map[string
 
 	ec2Filters = append(ec2Filters, ec2types.Filter{Name: &ec2FilterInstanceStateName, Values: []string{"pending", "running"}})
 
-	err := clients.waitForTargetInstances(ec2Filters, ssmFilters, waitTimeout)
-
+	err := clients.waitForTargetInstances(ctx, ec2Filters, ssmFilters, waitTimeout)
 	if err != nil {
-		log.Error(clients.ctx, err.Error())
+		log.Error(ctx, err.Error())
 		return ssmtypes.Command{}, err
 	}
 
-	output, err := clients.ssmClient.SendCommand(clients.ctx, &ssm.SendCommandInput{
+	output, err := clients.ssmClient.SendCommand(ctx, &ssm.SendCommandInput{
 		Targets:            ssmTargets,
 		DocumentName:       documentName,
 		Parameters:         parameters,
@@ -252,27 +239,27 @@ func (clients AwsClients) RunCommand(documentName *string, parameters map[string
 	})
 
 	if err != nil {
-		log.Error(clients.ctx, err.Error())
+		log.Error(ctx, err.Error())
 		return ssmtypes.Command{}, err
 	}
 
 	commandId := *output.Command.CommandId
 
-	err = clients.waitForCommandInvocations(commandId, executionTimeout)
+	err = clients.waitForCommandInvocations(ctx, commandId, executionTimeout)
 
-	clients.printCommandOutput(s3KeyPrefix, commandId, s3Bucket)
+	clients.printCommandOutput(ctx, s3KeyPrefix, commandId, s3Bucket)
 
 	if err != nil {
-		log.Error(clients.ctx, err.Error())
+		log.Error(ctx, err.Error())
 		return ssmtypes.Command{}, err
 	}
 
-	return clients.GetCommand(commandId)
+	return clients.GetCommand(ctx, commandId)
 }
 
 // Retrieves SSM command info by Id.
-func (clients AwsClients) GetCommand(commandId string) (ssmtypes.Command, error) {
-	commands, err := clients.ssmClient.ListCommands(clients.ctx, &ssm.ListCommandsInput{
+func (clients AwsClients) GetCommand(ctx context.Context, commandId string) (ssmtypes.Command, error) {
+	commands, err := clients.ssmClient.ListCommands(ctx, &ssm.ListCommandsInput{
 		CommandId: &commandId,
 	})
 

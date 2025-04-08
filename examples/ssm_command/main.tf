@@ -19,8 +19,7 @@ terraform {
     }
     ssm = {
       source  = "pbobov/ssm"
-      #source  = "local/providers/ssm"
-      version = "~> 0.2"
+      version = "0.2.0"
     }
   }
 }
