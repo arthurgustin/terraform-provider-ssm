@@ -1,0 +1,9 @@
+{
+  "data": {
+    "type": "gpg-keys",
+    "attributes": {
+      "namespace": "<org-name>",
+      "ascii-armor": ""
+    }  
+  }
+}
