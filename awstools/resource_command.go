@@ -122,13 +122,12 @@ func resourceCommandCreate(ctx context.Context, d *schema.ResourceData, m interf
 	extendedCtx, cancel := context.WithTimeout(ctx, time.Duration(executionTimeout+60)*time.Second)
 	defer cancel()
 
-	clients, err := NewAwsClients(extendedCtx)
-
-	if err != nil {
-		return diag.FromErr(err)
+	awsClients, ok := m.(*AwsClients)
+	if !ok {
+		return diag.Errorf("meta argument should be of type *AwsClients")
 	}
 
-	command, err := clients.RunCommand(&documentName, ssmParameters, ssmTargets, &executionTimeout, &comment, outputLocation.s3Bucket, outputLocation.s3KeyPrefix)
+	command, err := awsClients.RunCommand(extendedCtx, &documentName, ssmParameters, ssmTargets, &executionTimeout, &comment, outputLocation.s3Bucket, outputLocation.s3KeyPrefix)
 
 	if err != nil {
 		return diag.FromErr(err)
@@ -154,13 +153,12 @@ func resourceCommandRead(ctx context.Context, d *schema.ResourceData, m interfac
 
 	commandId := d.Id()
 
-	clients, err := NewAwsClients(ctx)
-
-	if err != nil {
-		return diag.FromErr(err)
+	awsClients, ok := m.(*AwsClients)
+	if !ok {
+		return diag.Errorf("meta argument should be of type *AwsClients")
 	}
 
-	command, err := clients.GetCommand(commandId)
+	command, err := awsClients.GetCommand(ctx, commandId)
 
 	if err != nil {
 		return diag.FromErr(err)
@@ -191,6 +189,11 @@ func resourceCommandUpdate(ctx context.Context, d *schema.ResourceData, m interf
 func resourceCommandDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	var diags diag.Diagnostics
 
+	awsClients, ok := m.(*AwsClients)
+	if !ok {
+		return diag.Errorf("meta argument should be of type *AwsClients")
+	}
+
 	documentName := d.Get(attDestroyDocumentName).(string)
 
 	if documentName != "" {
@@ -203,14 +206,7 @@ func resourceCommandDelete(ctx context.Context, d *schema.ResourceData, m interf
 		extendedCtx, cancel := context.WithTimeout(ctx, time.Duration(executionTimeout+60)*time.Second)
 		defer cancel()
 
-		clients, err := NewAwsClients(extendedCtx)
-
-		if err != nil {
-			return diag.FromErr(err)
-		}
-
-		_, err = clients.RunCommand(&documentName, ssmParameters, ssmTargets, &executionTimeout, &comment, outputLocation.s3Bucket, outputLocation.s3KeyPrefix)
-
+		_, err := awsClients.RunCommand(extendedCtx, &documentName, ssmParameters, ssmTargets, &executionTimeout, &comment, outputLocation.s3Bucket, outputLocation.s3KeyPrefix)
 		if err != nil {
 			return diag.FromErr(err)
 		}
