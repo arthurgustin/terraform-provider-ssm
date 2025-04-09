@@ -18,3 +18,9 @@
 *.tfstate
 *.tfstate.*
 *.lock.hcl
+
+# Intellij
+.idea
+
+# Examples
+examples/ssm_command/terraform.d

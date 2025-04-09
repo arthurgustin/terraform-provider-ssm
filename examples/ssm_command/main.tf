@@ -18,15 +18,31 @@ terraform {
       version = "~> 4.0"
     }
     ssm = {
-      source  = "pbobov/ssm"
-      #source  = "local/providers/ssm"
-      version = "~> 0.2"
+      source  = "rsn/ssm"
+      version = "0.0.42"
     }
+  }
+}
+
+provider "aws" {
+  region = "eu-north-1"
+  assume_role {
+    role_arn    = "arn:aws:iam::891377116719:role/iac-runner"
+    external_id = "iac-runner"
+  }
+}
+
+provider "ssm" {
+  region = "eu-north-1"
+  assume_role {
+    role_arn    = "arn:aws:iam::891377116719:role/iac-runner"
+    external_id = "iac-runner"
   }
 }
 
 variable "subnet_id" {
   type        = string
+  default     = "subnet-07a78f9e04fa4e6f6"
   description = "VPC subnet Id"
 }
 

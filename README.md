@@ -57,6 +57,12 @@ To build the provider locally for windows platform run:
 $ go build -o .\examples\terraform.d\plugins\local\providers\ssm\0.2.0\windows_amd64\terraform-provider-ssm.exe
 ```
 
+For linux (tested on WSL2 Ubuntu):
+
+```shell
+$ go build -o examples/ssm_command/terraform.d/plugins/local/providers/ssm/0.2.0/linux_amd64/terraform-provider-ssm_v0.0.1
+```
+
 ## Test the Locally Built Provider
 
 To use the locally built provider set attribute "source" of ssm provider to "local/providers/ssm":
@@ -68,6 +74,22 @@ terraform {
       source  = "local/providers/ssm"
       version = "0.2.0"
     }
+  }
+}
+```
+
+## Configuration options 
+
+This provider supports a subset of the AWS provider configuration.
+It currently supports the region and the assume_role like so. A use-case would be executing this provider on a CICD
+runner running on EC2, and creating resources on another AWS account.
+
+```terraform
+provider "ssm" {
+  region = "us-west-1"
+  assume_role {
+    role_arn    = "arn:aws:iam::ACCOUNT_ID:role/ROLE"
+    external_id = "EXTERNAL_ID"
   }
 }
 ```
